@@ -1,8 +1,8 @@
 // Service worker: funcionamiento sin conexión + recibir archivos desde "Compartir" (WhatsApp).
 importScripts('./db.js', './compromisos.js');
 
-const VERSION = 'co-v5';
-const SHELL = ['./', './index.html', './styles.css', './app.js', './db.js', './extract.js', './compromisos.js',
+const VERSION = 'co-v6';
+const SHELL = ['./', './index.html', './styles.css', './app.js', './db.js', './extract.js', './compromisos.js', './nube.js',
   './onedrive.js', './recibo.js', './config.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 // Recordatorios de vencimientos en segundo plano (cuando Android/Chrome lo permite)

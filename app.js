@@ -249,7 +249,9 @@ function vInicio() {
   const viejo = !S.ultimoRespaldo || Date.now() - S.ultimoRespaldo > 2 * 864e5;
 
   el.innerHTML = `
-    ${!OD.configurado() && pend && viejo ? `<div class="aviso">☁️ Tienes ${pend} cambio(s) sin respaldar en OneDrive.
+    ${Nube.configurada() && !S.sesion ? `<div class="aviso">🔐 Inicia sesión para ver la misma información en todos tus dispositivos.
+      <a class="btn" href="#ajustes" style="width:100%;margin-top:8px">Entrar</a></div>` : ''}
+    ${!Nube.configurada() && !OD.configurado() && pend && viejo ? `<div class="aviso">☁️ Tienes ${pend} cambio(s) sin respaldar en OneDrive.
       <button class="btn" id="btnRespInicio" style="width:100%;margin-top:8px">Guardar en OneDrive</button></div>` : ''}
     ${venc.length ? `<div class="card"><h3>📅 Próximos vencimientos</h3>${venc.slice(0, 5).map(({ c, q }) => `<div class="item" data-comp="${c.id}">
       <div><div class="t">${esc(c.nombre)}</div><small class="${q.dias <= 0 ? 'rojo-t' : ''}">${fechaCorta(q.fecha)} · ${textoVence(q)}</small></div>
@@ -551,7 +553,7 @@ async function mostrarSoporteExistente(r) {
   if (loc) { pintar(loc.blob); return; }
   prev.innerHTML = `<div class="pdf-prev">📎 Soporte guardado en OneDrive <button type="button" class="mini-btn" id="btnBajar">Ver</button></div>`;
   $('#btnBajar').addEventListener('click', async () => {
-    try { pintar(await OD.bajarBlob(r.archivo)); } catch (e) { toast('No disponible: ' + e.message); }
+    try { pintar(Nube.configurada() ? await Nube.bajarArchivo(r.archivo) : await OD.bajarBlob(r.archivo)); } catch (e) { toast('No disponible: ' + e.message); }
   });
 }
 
@@ -629,12 +631,33 @@ async function eliminar(id) {
 async function vAjustes() {
   const el = $('#v-ajustes');
   const con = await OD.conectado();
+  const u = Nube.configurada() ? await Nube.usuario().catch(() => null) : null;
+  const ultNube = await DB.getCfg('nubeUltima');
+  const tarjetaNube = !Nube.configurada() ? '' : u ? `
+    <div class="card"><h3>☁️ Cuenta en la nube</h3>
+      <p class="mini">✔ Conectado como <b>${esc(u.email)}</b>${ultNube ? ' · última sincronización: ' + new Date(ultNube).toLocaleString('es-CO') : ''}.
+      Todo lo que registres aquí aparece en tus otros dispositivos al abrir la app.</p>
+      ${S.recuperando ? `<form id="frmPass" class="form"><label>Nueva contraseña<input type="password" name="p" minlength="6" required autocomplete="new-password"></label>
+        <button class="btn" type="submit">Guardar contraseña</button></form>` : ''}
+      <div class="fila-btns"><button class="btn" id="nSync">⟳ Sincronizar ahora</button><button class="btn sec" id="nOut">Cerrar sesión</button></div>
+    </div>` : `
+    <div class="card"><h3>☁️ Cuenta en la nube</h3>
+      <p class="mini">Entra con tu correo para ver la misma información en el celular y en el computador.
+      La primera vez toca <b>Crear cuenta</b> (te llegará un correo para confirmar); después, siempre <b>Entrar</b>.</p>
+      <form id="frmNube" class="form">
+        <label>Correo<input type="email" name="email" required autocomplete="username"></label>
+        <label>Contraseña<input type="password" name="pass" required minlength="6" autocomplete="current-password"></label>
+        <div class="fila-btns"><button class="btn" type="submit" data-acc="entrar">Entrar</button><button class="btn sec" type="submit" data-acc="crear">Crear cuenta</button></div>
+        <button type="button" class="mini-btn" id="nOlvido">Olvidé mi contraseña</button>
+      </form>
+    </div>`;
   const ult = await DB.getCfg('ultimaSync');
   el.innerHTML = `
     <h2>Ajustes</h2>
     <div class="card form"><label>Nombre del proyecto<input id="aProy" value="${esc(S.cfg.proyecto)}"></label></div>
 
-    ${!OD.configurado() ? `<div class="card"><h3>☁️ Guardar en OneDrive</h3>
+    ${tarjetaNube}
+    ${!OD.configurado() ? `<div class="card"><h3>${Nube.configurada() ? '📁 Copia extra en OneDrive (opcional)' : '☁️ Guardar en OneDrive'}</h3>
       <p class="mini">${S.ultimoRespaldo ? 'Último respaldo: ' + new Date(S.ultimoRespaldo).toLocaleString('es-CO') : 'Aún no has hecho ningún respaldo.'}
         ${pendientesRespaldo() ? ` · <b>${pendientesRespaldo()} cambio(s) sin respaldar</b>` : ''}</p>
       <div class="fila-btns"><button class="btn" id="respNuevo">☁️ Guardar en OneDrive</button></div>
@@ -722,6 +745,42 @@ async function vAjustes() {
     } catch (err) { toast('Error: ' + err.message); }
   });
   $$('[data-notif]', el).forEach(b => b.addEventListener('click', activarAvisos));
+  const fn = $('#frmNube');
+  if (fn) {
+    let acc = 'entrar';
+    $$('[data-acc]', fn).forEach(b => b.addEventListener('click', () => { acc = b.dataset.acc; }));
+    fn.addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const email = fn.elements.email.value.trim(), pass = fn.elements.pass.value;
+      $$('button', fn).forEach(b => { b.disabled = true; });
+      try {
+        if (acc === 'crear') {
+          const confirmar = await Nube.crearCuenta(email, pass);
+          toast(confirmar ? '📧 Revisa tu correo y abre el enlace para confirmar la cuenta; luego toca Entrar.' : 'Cuenta creada ✔');
+        } else {
+          await Nube.entrar(email, pass);
+          toast('Sesión iniciada ✔ Sincronizando…');
+        }
+      } catch (e) { toast(e.message); }
+      finally { $$('button', fn).forEach(b => { b.disabled = false; }); }
+    });
+    $('#nOlvido').addEventListener('click', async () => {
+      const email = fn.elements.email.value.trim();
+      if (!email) { toast('Escribe primero tu correo'); return; }
+      try { await Nube.recuperar(email); toast('📧 Te enviamos un correo para cambiar la contraseña'); } catch (e) { toast(e.message); }
+    });
+  }
+  const fp = $('#frmPass');
+  if (fp) fp.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    const { error } = await (await Nube.cliente()).auth.updateUser({ password: fp.elements.p.value });
+    if (error) toast(error.message); else { S.recuperando = false; toast('Contraseña actualizada ✔'); vAjustes(); }
+  });
+  const ns = $('#nSync'); if (ns) ns.addEventListener('click', () => sincronizar(true).then(() => vAjustes()));
+  const no = $('#nOut'); if (no) no.addEventListener('click', async () => {
+    if (!confirm('¿Cerrar sesión? Los datos de este dispositivo se conservan.')) return;
+    await Nube.salir(); toast('Sesión cerrada'); vAjustes(); actualizarEstado();
+  });
   const rn = $('#respNuevo'); if (rn) rn.addEventListener('click', () => guardarEnOneDrive().then(() => vAjustes()));
   const rt = $('#respTodo'); if (rt) rt.addEventListener('click', () => guardarEnOneDrive(true).then(() => vAjustes()));
   const odIn = $('#odIn'); if (odIn) odIn.addEventListener('click', () => OD.login().catch(e => toast(e.message)));
@@ -890,7 +949,33 @@ async function fusionar(rem, desdeCopia = false) {
 }
 
 let sincronizando = false;
+async function sincronizarNube(manual) {
+  if (sincronizando) return;
+  if (!navigator.onLine) { actualizarEstado('Sin internet · se sincroniza al volver la conexión'); return; }
+  if (!(await Nube.usuario())) { if (manual) { toast('Inicia sesión en Ajustes para sincronizar'); location.hash = '#ajustes'; } actualizarEstado(); return; }
+  sincronizando = true;
+  actualizarEstado('Sincronizando…');
+  $('#btnSync').classList.add('girando');
+  try {
+    const antes = JSON.stringify([S.registros.length, S.comp.length, S.cfg.actualizado]);
+    await Nube.sincronizar();
+    if (manual) toast('Sincronizado ✔');
+    const despues = JSON.stringify([S.registros.length, S.comp.length, S.cfg.actualizado]);
+    const v = (location.hash.slice(1) || 'inicio').split('/')[0];
+    if ((manual || antes !== despues || S._recibido) && ['inicio', 'movimientos', 'compromisos'].includes(v)) render();
+  } catch (e) {
+    console.error(e);
+    if (e.message === 'NO_SESION') toast('Inicia sesión en Ajustes para sincronizar');
+    else if (manual) toast('Error al sincronizar: ' + e.message);
+  } finally {
+    sincronizando = false;
+    $('#btnSync').classList.remove('girando');
+    actualizarEstado();
+  }
+}
+
 async function sincronizar(manual = false) {
+  if (Nube.configurada()) return sincronizarNube(manual);
   if (sincronizando) return;
   if (!OD.configurado() || !(await OD.conectado())) { if (manual) toast('Primero conecta OneDrive en Ajustes'); actualizarEstado(); return; }
   if (!navigator.onLine) { actualizarEstado('Sin internet · se sincronizará después'); return; }
@@ -936,6 +1021,13 @@ async function sincronizar(manual = false) {
 async function actualizarEstado(msg) {
   const el = $('#estadoSync');
   if (msg) { el.textContent = msg; return; }
+  if (Nube.configurada()) {
+    const u = await Nube.usuario().catch(() => null);
+    if (!u) { el.textContent = '⚠️ Sin sesión · toca Ajustes para entrar'; return; }
+    const p = Nube.pendientes(), ult = await DB.getCfg('nubeUltima');
+    el.textContent = p ? `⏳ ${p} cambio(s) por subir` : '✔ Sincronizado' + (ult ? ' · ' + new Date(ult).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : '');
+    return;
+  }
   const pend = S.registros.filter(r => !r.sync).length;
   if (!OD.configurado()) {
     el.textContent = pend ? `☁️ ${pend} cambio(s) sin respaldar` :
@@ -968,13 +1060,32 @@ async function cargarCompartidos() {
   }
   render();
   actualizarEstado();
-  $('#btnSync').addEventListener('click', () => OD.configurado() ? sincronizar(true) : guardarEnOneDrive());
-  if (!OD.configurado()) { $('#btnSync').textContent = '☁️'; $('#btnSync').title = 'Guardar en OneDrive'; }
+  $('#btnSync').addEventListener('click', () => (Nube.configurada() || OD.configurado()) ? sincronizar(true) : guardarEnOneDrive());
+  if (!Nube.configurada() && !OD.configurado()) { $('#btnSync').textContent = '☁️'; $('#btnSync').title = 'Guardar en OneDrive'; }
+  if (Nube.configurada()) {
+    // Escucha inicio/cierre de sesión (incluye el enlace de confirmación del correo)
+    Nube.cliente().then(c => {
+      if (!c) return;
+      c.auth.onAuthStateChange((ev, session) => {
+        const antes = S.sesion;
+        S.sesion = !!session;
+        if (ev === 'PASSWORD_RECOVERY') { S.recuperando = true; location.hash = '#ajustes'; render(); return; }
+        if (antes !== S.sesion) {
+          actualizarEstado();
+          const v = (location.hash.slice(1) || 'inicio').split('/')[0];
+          if (v === 'inicio' || v === 'ajustes') setTimeout(render, 0);
+          if (S.sesion) setTimeout(() => sincronizar(), 0);
+        }
+      });
+    }).catch(e => console.warn('nube', e));
+    setInterval(() => { if (document.visibilityState === 'visible') sincronizar(); }, 60000);
+  }
   setTimeout(() => cargarLib('xlsx').catch(() => {}), 2000); // precarga para que el respaldo sea inmediato
   programarAvisos().catch(e => console.warn('avisos', e));
   window.addEventListener('online', () => sincronizar());
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible') return;
+    sincronizar();
     const antes = S.cola.length;
     await cargarCompartidos();
     if (S.cola.length > antes && !location.hash.startsWith('#nuevo/')) { if (location.hash === '#nuevo') render(); else location.hash = '#nuevo'; }

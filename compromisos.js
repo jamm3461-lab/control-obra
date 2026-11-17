@@ -270,6 +270,7 @@ function formCompromiso(el, c) {
     await guardarCfg();
     toast('Compromiso guardado ✔');
     programarAvisos();
+    sincronizar();
     location.hash = '#compromisos/' + comp.id;
   });
 
@@ -280,6 +281,7 @@ function formCompromiso(el, c) {
     S.registros.filter(r => r.compromisoId === c.id).forEach(r => { r.compromisoId = ''; r.modificado = Date.now(); r.sync = false; DB.put('registros', r); });
     await guardarComps();
     toast('Compromiso eliminado');
+    sincronizar();
     location.hash = '#compromisos';
   });
 }

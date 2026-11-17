@@ -24,6 +24,7 @@ const OD = (() => {
   }
 
   async function manejarRetorno() {
+    if (!configurado()) return false;
     const p = new URLSearchParams(location.search);
     if (!p.get('code') && !p.get('error')) return false;
     history.replaceState(null, '', redirect());
