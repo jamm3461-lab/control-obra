@@ -5,13 +5,11 @@ const Nube = (() => {
   let sb = null;
   const configurada = () => !!(APP_CONFIG.SUPABASE_URL && APP_CONFIG.SUPABASE_KEY);
 
-  async function cliente() {
-    if (!configurada()) return null;
-    if (sb) return sb;
-    await cargarLib('supabase');
-    sb = supabase.createClient(APP_CONFIG.SUPABASE_URL, APP_CONFIG.SUPABASE_KEY, {
+  function cliente() {
+    if (!configurada()) return Promise.resolve(null);
+    if (!sb) sb = cargarLib('supabase').then(() => supabase.createClient(APP_CONFIG.SUPABASE_URL, APP_CONFIG.SUPABASE_KEY, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'co-auth' }
-    });
+    })).catch(e => { sb = null; throw e; });
     return sb;
   }
 

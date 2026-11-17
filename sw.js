@@ -1,7 +1,7 @@
 // Service worker: funcionamiento sin conexión + recibir archivos desde "Compartir" (WhatsApp).
 importScripts('./db.js', './compromisos.js');
 
-const VERSION = 'co-v7';
+const VERSION = 'co-v8';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './db.js', './extract.js', './compromisos.js', './nube.js',
   './onedrive.js', './recibo.js', './config.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 

@@ -221,7 +221,8 @@ function vInicio() {
   const cs = compsActivos();
   const el = $('#v-inicio');
   if (!rs.length && !cs.length) {
-    el.innerHTML = `<div class="vacio"><div style="font-size:48px">🏗️</div><p>Aún no hay pagos registrados.</p>
+    el.innerHTML = (Nube.configurada() && !S.sesion ? `<div class="aviso">🔐 ¿Ya registraste pagos en otro dispositivo? Inicia sesión para traerlos.
+      <a class="btn" href="#ajustes" style="width:100%;margin-top:8px">Entrar</a></div>` : '') + `<div class="vacio"><div style="font-size:48px">🏗️</div><p>Aún no hay pagos registrados.</p>
       <p class="mini">Toca <b>＋ Registrar</b>, o desde WhatsApp mantén presionada una factura → <b>Compartir</b> → <b>Control Obra</b>.</p>
       <a class="btn" href="#nuevo">Registrar el primer pago</a></div>`;
     return;
