@@ -1,7 +1,7 @@
 # Control de Obra: guía de instalación
 
 App para el celular (Android) que controla los desembolsos del proyecto de construcción.
-Funciona sin mensualidades. Los datos se guardan en el celular y se sincronizan con tu OneDrive personal.
+Funciona sin mensualidades. Los datos se guardan en el celular y se respaldan en tu OneDrive personal con un toque.
 
 ## Qué hace
 
@@ -43,24 +43,27 @@ Solo se publica el **código**. Tus datos y facturas **no** se publican: quedan 
 3. En el repositorio, ve a **Settings → Pages → Source: Deploy from a branch → main / (root)**.
 4. La app quedará en: `https://TU-USUARIO.github.io/control-obra/`
 
-## Paso 2: Conectar OneDrive (registro gratuito en Microsoft)
+## Paso 2: Guardar en OneDrive (sin registros en Microsoft)
 
-1. Entra a https://portal.azure.com con tu cuenta Hotmail.
-   Si te pide crear una "cuenta gratuita de Azure" o un "directorio", sigue el asistente.
-   No se usa ningún servicio pago.
-2. Busca **"Registros de aplicaciones" (App registrations)** y toca **Nuevo registro**.
-   - Nombre: `Control de Obra`
-   - Tipos de cuenta: **Solo cuentas personales de Microsoft**
-   - URI de redirección: plataforma **Aplicación de página única (SPA)**, con la URL del paso 1
-     (`https://TU-USUARIO.github.io/control-obra/`, incluida la barra final).
-3. Copia el **Id. de aplicación (cliente)** y pégalo en `config.js`, en `MS_CLIENT_ID: '...'`.
-4. Vuelve a subir `config.js` a GitHub.
+La app no se conecta directamente a OneDrive (eso exige un registro en Microsoft que con cuentas Hotmail falla).
+En su lugar usa el menú **Compartir** de Android junto con la app de **OneDrive** instalada en el celular:
+
+1. Toca **☁️** (arriba a la derecha), o ve a **Ajustes → Guardar en OneDrive**.
+2. En el menú Compartir elige **OneDrive** y navega a **Proyectos › ControlObra › Datos**.
+3. Toca **Subir**. Si OneDrive pregunta por archivos repetidos, elige **Reemplazar**.
+
+Se envían: `Control_Obra.xlsx`, `Control_Obra_copia_seguridad.txt` y los soportes nuevos (facturas, fotos y recibos).
+La app avisa en el inicio cuando llevas más de 2 días con cambios sin respaldar.
+
+Para pasar los datos a otro celular: instala la app y en **Ajustes → Restaurar** elige el archivo `Control_Obra_copia_seguridad.txt` desde OneDrive.
+
+> Opción avanzada (no necesaria): si algún día se registra la app en Microsoft, se pone el "Client ID" en `config.js` y la sincronización pasa a ser automática.
 
 ## Paso 3: Instalar en el celular Android
 
 1. Abre la URL del paso 1 en **Chrome**.
 2. En el menú ⋮, toca **Agregar a la pantalla principal** y luego **Instalar**.
-3. Abre la app, ve a **Ajustes** y toca **Conectar OneDrive**.
+3. Abre la app. Para respaldar, toca **☁️** (ver paso 2).
 4. Desde ese momento, "Control Obra" aparece en el menú **Compartir** de WhatsApp.
 
 ## Paso 4 (opcional): Usar tu suscripción de Claude
@@ -72,7 +75,7 @@ Solo se publica el **código**. Tus datos y facturas **no** se publican: quedan 
 
 ## Notas
 
-- Sin internet, la app sigue funcionando y sincroniza cuando vuelve la conexión.
+- Sin internet, la app sigue funcionando; los datos quedan en el celular hasta que hagas el respaldo.
   El OCR necesita internet solo la primera vez, para descargar el idioma español.
-- Si pasa más de un día sin abrir la app, Microsoft puede pedir que vuelvas a tocar **Conectar OneDrive**.
+- **Importante:** si borras los datos de Chrome o desinstalas la app, se borra lo guardado en el celular. Por eso conviene respaldar seguido.
 - En **Ajustes** puedes descargar el Excel y hacer o restaurar una copia de seguridad.

@@ -68,6 +68,70 @@ const activos = () => S.registros.filter(r => !r.eliminado);
 async function cargar() {
   S.registros = await DB.all('registros');
   Object.assign(S.cfg, await DB.getCfg('cfg', {}));
+  S.ultimoRespaldo = await DB.getCfg('ultimaSync', 0);
+}
+
+// ---------- Respaldo a OneDrive por el menú "Compartir" de Android ----------
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const puedeCompartir = fs => { try { return !!(navigator.canShare && navigator.canShare({ files: fs })); } catch { return false; } };
+const pendientesRespaldo = () => S.registros.filter(r => !r.sync).length;
+
+async function prepararRespaldo(todosSoportes) {
+  const files = [];
+  const xlsx = new File([await Exportar.excel()], 'Control_Obra.xlsx', { type: XLSX_MIME });
+  if (puedeCompartir([xlsx])) files.push(xlsx);
+  else files.push(new File(['﻿' + Exportar.csv()], 'Control_Obra.csv', { type: 'text/csv' }));
+  files.push(new File([JSON.stringify(paquete())], 'Control_Obra_copia_seguridad.txt', { type: 'text/plain' }));
+  const regs = activos().filter(r => r.archivo && (todosSoportes || !r.archivoSubido));
+  let omitidos = 0;
+  for (const r of regs) {
+    const a = await DB.get('archivos', r.id);
+    if (!a) continue;
+    const f = new File([a.blob], r.archivo.split('/').pop(), { type: a.tipo || a.blob.type });
+    if (puedeCompartir([f])) files.push(f); else omitidos++;
+  }
+  return { files, regs, omitidos, excel: files[0].name };
+}
+
+async function marcarRespaldado(regs) {
+  regs.forEach(r => { r.archivoSubido = true; });
+  for (const r of S.registros) { r.sync = true; await DB.put('registros', r); }
+  S.ultimoRespaldo = Date.now();
+  await DB.setCfg('ultimaSync', S.ultimoRespaldo);
+  actualizarEstado();
+}
+
+async function guardarEnOneDrive(todosSoportes = false) {
+  if (!navigator.canShare) { toast('Este navegador no permite compartir archivos. Usa "Descargar Excel" en Ajustes.'); return; }
+  if (!activos().length) { toast('Aún no hay pagos para respaldar'); return; }
+  let prep;
+  try { prep = await prepararRespaldo(todosSoportes); }
+  catch (e) { toast('Error preparando el respaldo: ' + e.message); return; }
+
+  const compartir = async () => {
+    try {
+      await navigator.share({ files: prep.files, title: 'Control de Obra - respaldo' });
+      await marcarRespaldado(prep.regs);
+      toast(`Respaldo enviado: ${prep.files.length} archivo(s) ✔`);
+      if (prep.omitidos) toast(`${prep.omitidos} soporte(s) no se pudieron enviar por su tipo de archivo`);
+      render();
+      return true;
+    } catch (e) {
+      if (e.name === 'AbortError') { toast('Respaldo cancelado'); return true; }
+      if (e.name === 'NotAllowedError') return false;
+      toast('Error al compartir: ' + e.message); return true;
+    }
+  };
+  if (await compartir()) return;
+
+  // Si Android pidió un toque nuevo (la preparación tardó), mostramos un botón para confirmar
+  const dlg = document.createElement('dialog');
+  dlg.innerHTML = `<h3>Respaldo listo</h3><p class="mini">${prep.files.length} archivo(s): ${esc(prep.excel)}, copia de seguridad y ${prep.files.length - 2} soporte(s).</p>
+    <div class="fila-btns"><button class="btn sec" data-x>Cancelar</button><button class="btn" data-ok>☁️ Enviar a OneDrive</button></div>`;
+  document.body.appendChild(dlg);
+  dlg.querySelector('[data-x]').onclick = () => { dlg.close(); dlg.remove(); };
+  dlg.querySelector('[data-ok]').onclick = async () => { dlg.close(); dlg.remove(); await compartir(); };
+  dlg.showModal();
 }
 async function guardarCfg(tocar = true) {
   if (tocar) S.cfg.actualizado = Date.now();
@@ -160,8 +224,12 @@ function vInicio() {
   const porM = meses.map(m => suma(pag.filter(r => r.fecha.startsWith(m))));
   const maxM = Math.max(...porM, 1);
   const proximos = pp.slice().sort((a, b) => a.fecha.localeCompare(b.fecha)).slice(0, 5);
+  const pend = pendientesRespaldo();
+  const viejo = !S.ultimoRespaldo || Date.now() - S.ultimoRespaldo > 2 * 864e5;
 
   el.innerHTML = `
+    ${!OD.configurado() && pend && viejo ? `<div class="aviso">☁️ Tienes ${pend} cambio(s) sin respaldar en OneDrive.
+      <button class="btn" id="btnRespInicio" style="width:100%;margin-top:8px">Guardar en OneDrive</button></div>` : ''}
     <div class="kpis">
       <div class="kpi"><small>Total pagado</small><b>${fmt(suma(pag))}</b></div>
       <div class="kpi ${pp.length ? 'warn' : ''}"><small>Por pagar (${pp.length})</small><b>${fmt(suma(pp))}</b></div>
@@ -178,6 +246,7 @@ function vInicio() {
     </div>
     ${proximos.length ? `<div class="card"><h3>Pendientes por pagar</h3>${proximos.map(itemHTML).join('')}</div>` : ''}`;
   enlazarItems(el);
+  const br = $('#btnRespInicio'); if (br) br.addEventListener('click', () => guardarEnOneDrive());
 }
 
 function itemHTML(r) {
@@ -520,9 +589,16 @@ async function vAjustes() {
     <h2>Ajustes</h2>
     <div class="card form"><label>Nombre del proyecto<input id="aProy" value="${esc(S.cfg.proyecto)}"></label></div>
 
-    <div class="card"><h3>OneDrive</h3>
-      <p class="mini">${!OD.configurado() ? '⚠️ Falta configurar la conexión (ver LEEME.md, paso 2). Mientras tanto, todo se guarda en este celular.'
-        : con ? '✔ Conectado' + (ult ? ' · última sincronización: ' + new Date(ult).toLocaleString('es-CO') : '') : 'No conectado'}</p>
+    ${!OD.configurado() ? `<div class="card"><h3>☁️ Guardar en OneDrive</h3>
+      <p class="mini">${S.ultimoRespaldo ? 'Último respaldo: ' + new Date(S.ultimoRespaldo).toLocaleString('es-CO') : 'Aún no has hecho ningún respaldo.'}
+        ${pendientesRespaldo() ? ` · <b>${pendientesRespaldo()} cambio(s) sin respaldar</b>` : ''}</p>
+      <div class="fila-btns"><button class="btn" id="respNuevo">☁️ Guardar en OneDrive</button></div>
+      <p class="mini">Se abre el menú <b>Compartir</b>: elige <b>OneDrive</b> y la carpeta <b>Proyectos › ControlObra › Datos</b>.
+      Se envían el Excel, la copia de seguridad y los soportes nuevos. Si OneDrive pregunta, elige <b>Reemplazar</b>.</p>
+      <button class="mini-btn" id="respTodo">Volver a enviar TODOS los soportes</button>
+    </div>` : ''}
+    <div class="card" ${OD.configurado() ? '' : 'hidden'}><h3>OneDrive (sincronización automática)</h3>
+      <p class="mini">${con ? '✔ Conectado' + (ult ? ' · última sincronización: ' + new Date(ult).toLocaleString('es-CO') : '') : 'No conectado'}</p>
       <div class="fila-btns">
         ${con ? '<button class="btn sec" id="odSync">⟳ Sincronizar ahora</button><button class="btn sec" id="odOut">Desconectar</button>'
         : `<button class="btn" id="odIn" ${OD.configurado() ? '' : 'disabled'}>Conectar OneDrive</button>`}
@@ -535,7 +611,7 @@ async function vAjustes() {
       <div class="fila-btns">
         <button class="btn sec" id="xExcel">⬇ Descargar Excel</button>
         <button class="btn sec" id="xJson">⬇ Copia de seguridad</button>
-        <label class="btn sec">⬆ Restaurar<input type="file" accept="application/json,.json" hidden id="xRest"></label>
+        <label class="btn sec">⬆ Restaurar<input type="file" accept="application/json,.json,text/plain,.txt" hidden id="xRest"></label>
       </div>
     </div>
 
@@ -592,6 +668,8 @@ async function vAjustes() {
       await fusionar(j, true); toast('Copia restaurada'); render(); sincronizar();
     } catch (err) { toast('Error: ' + err.message); }
   });
+  const rn = $('#respNuevo'); if (rn) rn.addEventListener('click', () => guardarEnOneDrive().then(() => vAjustes()));
+  const rt = $('#respTodo'); if (rt) rt.addEventListener('click', () => guardarEnOneDrive(true).then(() => vAjustes()));
   const odIn = $('#odIn'); if (odIn) odIn.addEventListener('click', () => OD.login().catch(e => toast(e.message)));
   const odSync = $('#odSync'); if (odSync) odSync.addEventListener('click', () => sincronizar(true).then(vAjustes));
   const odOut = $('#odOut'); if (odOut) odOut.addEventListener('click', async () => { await OD.cerrar(); toast('OneDrive desconectado'); vAjustes(); actualizarEstado(); });
@@ -616,6 +694,13 @@ function descargar(blob, nombre) {
 
 // ---------- Excel ----------
 const Exportar = {
+  csv() {
+    const q = v => { const s = String(v ?? ''); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const H = ['Fecha', 'Concepto', 'Proveedor / persona', 'NIT / CC', 'N° factura', 'Valor', 'Estado', 'Medio de pago', 'Tipo de soporte', 'Período', 'Observaciones', 'Recibo N°', 'Archivo soporte'];
+    const rs = activos().slice().sort((a, b) => a.fecha.localeCompare(b.fecha));
+    return [H, ...rs.map(r => [r.fecha.split('-').reverse().join('/'), r.concepto, r.tercero, r.docId, r.factura, r.valor, r.estado, r.medioPago,
+      r.soporteTipo, r.periodo, r.observaciones, r.reciboNo, (r.archivo || '').split('/').pop()])].map(f => f.map(q).join(';')).join('\r\n');
+  },
   async excel() {
     await cargarLib('xlsx');
     const rs = activos().slice().sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -743,7 +828,11 @@ async function actualizarEstado(msg) {
   const el = $('#estadoSync');
   if (msg) { el.textContent = msg; return; }
   const pend = S.registros.filter(r => !r.sync).length;
-  if (!OD.configurado()) { el.textContent = 'Guardado en este celular'; return; }
+  if (!OD.configurado()) {
+    el.textContent = pend ? `☁️ ${pend} cambio(s) sin respaldar` :
+      S.ultimoRespaldo ? 'Respaldado en OneDrive ✔ ' + new Date(S.ultimoRespaldo).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }) : 'Guardado en este celular';
+    return;
+  }
   if (!(await OD.conectado())) { el.textContent = 'OneDrive sin conectar' + (pend ? ` · ${pend} pendientes` : ''); return; }
   const ult = await DB.getCfg('ultimaSync');
   el.textContent = pend ? `${pend} cambio(s) por sincronizar` : 'OneDrive ✔' + (ult ? ' · ' + new Date(ult).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }) : '');
@@ -770,7 +859,9 @@ async function cargarCompartidos() {
   }
   render();
   actualizarEstado();
-  $('#btnSync').addEventListener('click', () => sincronizar(true));
+  $('#btnSync').addEventListener('click', () => OD.configurado() ? sincronizar(true) : guardarEnOneDrive());
+  if (!OD.configurado()) { $('#btnSync').textContent = '☁️'; $('#btnSync').title = 'Guardar en OneDrive'; }
+  setTimeout(() => cargarLib('xlsx').catch(() => {}), 2000); // precarga para que el respaldo sea inmediato
   window.addEventListener('online', () => sincronizar());
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible') return;

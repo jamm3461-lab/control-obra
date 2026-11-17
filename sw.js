@@ -1,7 +1,7 @@
 // Service worker: funcionamiento sin conexión + recibir archivos desde "Compartir" (WhatsApp).
 importScripts('./db.js');
 
-const VERSION = 'co-v2';
+const VERSION = 'co-v3';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './db.js', './extract.js',
   './onedrive.js', './recibo.js', './config.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 const CDN = ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com'];
