@@ -5,7 +5,7 @@ window.APP_CONFIG = {
   // la seguridad la dan las reglas RLS de la base de datos (cada usuario solo ve lo suyo).
   // NUNCA poner aquí la clave "secret" / "service_role".
   SUPABASE_URL: 'https://fxpizuenjzdfxmwedqah.supabase.co',
-  SUPABASE_KEY: '',
+  SUPABASE_KEY: 'sb_publishable_eUJMFk9VgoaDotWUgQaYww_9s4TGegE',
 
   // Conexión directa con OneDrive (no se usa: el registro en Microsoft falló). Dejar vacío.
   MS_CLIENT_ID: '',
