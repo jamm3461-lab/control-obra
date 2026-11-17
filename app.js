@@ -78,20 +78,20 @@ const puedeCompartir = fs => { try { return !!(navigator.canShare && navigator.c
 const pendientesRespaldo = () => S.registros.filter(r => !r.sync).length + (S.comp || []).filter(c => !c.sync).length;
 
 async function prepararRespaldo(todosSoportes) {
-  const files = [];
-  const xlsx = new File([await Exportar.excel()], 'Control_Obra.xlsx', { type: XLSX_MIME });
-  if (puedeCompartir([xlsx])) files.push(xlsx);
-  else files.push(new File(['﻿' + Exportar.csv()], 'Control_Obra.csv', { type: 'text/csv' }));
+  // Chrome en Android rechaza compartir .xlsx (aunque canShare diga que sí); por eso se envían CSV.
+  const files = await Exportar.csvs();
+  const nBase = files.length + 1;
   files.push(new File([JSON.stringify(paquete())], 'Control_Obra_copia_seguridad.txt', { type: 'text/plain' }));
   const regs = activos().filter(r => r.archivo && (todosSoportes || !r.archivoSubido));
   let omitidos = 0;
   for (const r of regs) {
     const a = await DB.get('archivos', r.id);
     if (!a) continue;
-    const f = new File([a.blob], r.archivo.split('/').pop(), { type: a.tipo || a.blob.type });
-    if (puedeCompartir([f])) files.push(f); else omitidos++;
+    const tipo = a.tipo || a.blob.type || '';
+    if (!/^(image\/(jpeg|png|webp|gif|bmp)|application\/pdf)$/.test(tipo)) { omitidos++; continue; }
+    files.push(new File([a.blob], r.archivo.split('/').pop(), { type: tipo }));
   }
-  return { files, regs, omitidos, excel: files[0].name };
+  return { files, regs, omitidos, nBase };
 }
 
 async function marcarRespaldado(regs) {
@@ -110,9 +110,11 @@ async function guardarEnOneDrive(todosSoportes = false) {
   try { prep = await prepararRespaldo(todosSoportes); }
   catch (e) { toast('Error preparando el respaldo: ' + e.message); return; }
 
+  let intento = 0;
   const compartir = async () => {
+    intento++;
     try {
-      await navigator.share({ files: prep.files, title: 'Control de Obra - respaldo' });
+      await navigator.share({ files: prep.files });
       await marcarRespaldado(prep.regs);
       toast(`Respaldo enviado: ${prep.files.length} archivo(s) ✔`);
       if (prep.omitidos) toast(`${prep.omitidos} soporte(s) no se pudieron enviar por su tipo de archivo`);
@@ -120,19 +122,30 @@ async function guardarEnOneDrive(todosSoportes = false) {
       return true;
     } catch (e) {
       if (e.name === 'AbortError') { toast('Respaldo cancelado'); return true; }
-      if (e.name === 'NotAllowedError') return false;
-      toast('Error al compartir: ' + e.message); return true;
+      if (e.name === 'NotAllowedError' && intento === 1) return false;
+      if (e.name === 'NotAllowedError' && prep.files.length > prep.nBase) {
+        // Si Android rechaza algún soporte, al menos respaldar los datos
+        toast('Android rechazó algún soporte; envío solo los datos');
+        prep.files = prep.files.slice(0, prep.nBase); prep.regs = []; intento = 0;
+        return false;
+      }
+      toast('No se pudo compartir: ' + (e.message || e.name)); return true;
     }
   };
   if (await compartir()) return;
 
-  // Si Android pidió un toque nuevo (la preparación tardó), mostramos un botón para confirmar
+  // Android exige un toque nuevo para abrir el menú Compartir: mostramos un botón para confirmar
   const dlg = document.createElement('dialog');
-  dlg.innerHTML = `<h3>Respaldo listo</h3><p class="mini">${prep.files.length} archivo(s): ${esc(prep.excel)}, copia de seguridad y ${prep.files.length - 2} soporte(s).</p>
+  dlg.innerHTML = `<h3>Respaldo listo</h3><p class="mini">${prep.files.length} archivo(s): Excel en ${prep.nBase - 1} hoja(s) CSV, copia de seguridad y ${prep.files.length - prep.nBase} soporte(s).</p>
     <div class="fila-btns"><button class="btn sec" data-x>Cancelar</button><button class="btn" data-ok>☁️ Enviar a OneDrive</button></div>`;
   document.body.appendChild(dlg);
   dlg.querySelector('[data-x]').onclick = () => { dlg.close(); dlg.remove(); };
-  dlg.querySelector('[data-ok]').onclick = async () => { dlg.close(); dlg.remove(); await compartir(); };
+  dlg.querySelector('[data-ok]').onclick = async () => {
+    dlg.close();
+    if (await compartir()) { dlg.remove(); return; }
+    dlg.querySelector('p').textContent = `${prep.files.length} archivo(s) (solo los datos). Toca de nuevo para enviar.`;
+    dlg.showModal();
+  };
   dlg.showModal();
 }
 async function guardarCfg(tocar = true) {
@@ -626,7 +639,8 @@ async function vAjustes() {
         ${pendientesRespaldo() ? ` · <b>${pendientesRespaldo()} cambio(s) sin respaldar</b>` : ''}</p>
       <div class="fila-btns"><button class="btn" id="respNuevo">☁️ Guardar en OneDrive</button></div>
       <p class="mini">Se abre el menú <b>Compartir</b>: elige <b>OneDrive</b> y la carpeta <b>Proyectos › ControlObra › Datos</b>.
-      Se envían el Excel, la copia de seguridad y los soportes nuevos. Si OneDrive pregunta, elige <b>Reemplazar</b>.</p>
+      Se envían el Excel (una hoja CSV por pestaña, se abren con Excel), la copia de seguridad y los soportes nuevos. Si OneDrive pregunta, elige <b>Reemplazar</b>.
+      El Excel completo (.xlsx con todas las hojas) se descarga con <b>⬇ Descargar Excel</b> más abajo.</p>
       <button class="mini-btn" id="respTodo">Volver a enviar TODOS los soportes</button>
     </div>` : ''}
     <div class="card" ${OD.configurado() ? '' : 'hidden'}><h3>OneDrive (sincronización automática)</h3>
@@ -742,6 +756,26 @@ const Exportar = {
       r.soporteTipo, r.periodo, r.observaciones, r.reciboNo, (r.archivo || '').split('/').pop()])].map(f => f.map(q).join(';')).join('\r\n');
   },
   async excel() {
+    const buf = XLSX.write(await this.libro(), { bookType: 'xlsx', type: 'array' });
+    return new Blob([buf], { type: XLSX_MIME });
+  },
+  // Una hoja CSV por cada hoja del Excel (Android sí permite compartir CSV, no .xlsx)
+  async csvs() {
+    const wb = await this.libro();
+    const dd = n => String(n).padStart(2, '0');
+    return wb.SheetNames.map(n => {
+      const ws = wb.Sheets[n];
+      for (const k in ws) {
+        const c = ws[k]; if (k[0] === '!' || !c) continue;
+        if (c.t === 'd' && c.v instanceof Date) c.w = `${dd(c.v.getDate())}/${dd(c.v.getMonth() + 1)}/${c.v.getFullYear()}`;
+        else if (c.t === 'n' && c.z && c.z.includes('%')) { c.v = Math.round(c.v * 1000) / 10; c.w = String(c.v).replace('.', ','); }
+      }
+      let t = XLSX.utils.sheet_to_csv(ws, { FS: ';', rawNumbers: true, blankrows: false });
+      t = t.replace(/(^|;)(-?\d+)\.(\d+)(?=;|$)/gm, '$1$2,$3'); // decimales con coma para Excel en español
+      return new File(['﻿' + t], `Control_Obra - ${n}.csv`, { type: 'text/csv' });
+    });
+  },
+  async libro() {
     await cargarLib('xlsx');
     const rs = activos().slice().sort((a, b) => a.fecha.localeCompare(b.fecha));
     const aFecha = f => { const [y, m, d] = f.split('-').map(Number); return new Date(y, m - 1, d, 12); };
@@ -820,8 +854,7 @@ const Exportar = {
       w5['!cols'] = [28, 12, 15, 15, 15, 11].map(w => ({ wch: w }));
       XLSX.utils.book_append_sheet(wb, w5, 'Cuotas');
     }
-    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    return wb;
   }
 };
 

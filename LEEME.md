@@ -54,7 +54,7 @@ En su lugar usa el menú **Compartir** de Android junto con la app de **OneDrive
 2. En el menú Compartir elige **OneDrive** y navega a **Proyectos › ControlObra › Datos**.
 3. Toca **Subir**. Si OneDrive pregunta por archivos repetidos, elige **Reemplazar**.
 
-Se envían: `Control_Obra.xlsx`, `Control_Obra_copia_seguridad.txt` y los soportes nuevos (facturas, fotos y recibos).
+Se envían: el Excel como archivos CSV (uno por hoja: Movimientos, Resumen por concepto, Por mes, Compromisos, Cuotas; se abren con Excel), `Control_Obra_copia_seguridad.txt` y los soportes nuevos. Chrome en Android no permite compartir archivos .xlsx; el Excel completo se descarga con **Ajustes → ⬇ Descargar Excel**.
 La app avisa en el inicio cuando llevas más de 2 días con cambios sin respaldar.
 
 Para pasar los datos a otro celular: instala la app y en **Ajustes → Restaurar** elige el archivo `Control_Obra_copia_seguridad.txt` desde OneDrive.
