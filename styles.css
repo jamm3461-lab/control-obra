@@ -112,3 +112,22 @@ pre.prompt { white-space: pre-wrap; font-size: 12px; background: var(--bg); padd
 .cufe { font-size: 11px; color: var(--sub); word-break: break-all; margin-bottom: 10px; }
 [hidden] { display: none !important; }
 .btn.instalar { width: 100%; margin-bottom: 12px; background: var(--acc); }
+/* Compromisos */
+.comp { cursor: pointer; }
+.comp-top { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.comp-top .t { font-weight: 600; }
+.comp-top .v { text-align: right; font-weight: 700; font-size: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.comp-top .v small { display: block; font-weight: 400; }
+.comp .pista, .card > .pista { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; margin-bottom: 6px; }
+.comp .pista i { display: block; height: 100%; background: var(--pri2); }
+.venc { margin-top: 8px; font-size: 13px; padding: 6px 10px; border-radius: 8px; background: var(--bg); }
+.venc.amarillo { background: var(--tag-pp-bg); color: var(--tag-pp); }
+.venc.rojo { background: var(--tag-ss-bg); color: var(--tag-ss); font-weight: 600; }
+.venc.ok, .tag.ok { background: var(--tag-ok-bg); color: var(--tag-ok); }
+.rojo-t { color: var(--bad) !important; font-weight: 600; }
+.item.quieto { cursor: default; }
+.cuota-fila { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+.cuota-fila input { margin-top: 0 !important; }
+nav.bottom a { font-size: 11px; }
+:root { --tag-ok-bg: #d5f0e0; --tag-ok: #1e6b43; }
+@media (prefers-color-scheme: dark) { :root { --tag-ok-bg: #173a28; --tag-ok: #8fd9ad; } }

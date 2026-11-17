@@ -69,12 +69,13 @@ async function cargar() {
   S.registros = await DB.all('registros');
   Object.assign(S.cfg, await DB.getCfg('cfg', {}));
   S.ultimoRespaldo = await DB.getCfg('ultimaSync', 0);
+  S.comp = await DB.getCfg('compromisos', []);
 }
 
 // ---------- Respaldo a OneDrive por el menú "Compartir" de Android ----------
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const puedeCompartir = fs => { try { return !!(navigator.canShare && navigator.canShare({ files: fs })); } catch { return false; } };
-const pendientesRespaldo = () => S.registros.filter(r => !r.sync).length;
+const pendientesRespaldo = () => S.registros.filter(r => !r.sync).length + (S.comp || []).filter(c => !c.sync).length;
 
 async function prepararRespaldo(todosSoportes) {
   const files = [];
@@ -96,6 +97,7 @@ async function prepararRespaldo(todosSoportes) {
 async function marcarRespaldado(regs) {
   regs.forEach(r => { r.archivoSubido = true; });
   for (const r of S.registros) { r.sync = true; await DB.put('registros', r); }
+  S.comp.forEach(c => { c.sync = true; }); await guardarComps();
   S.ultimoRespaldo = Date.now();
   await DB.setCfg('ultimaSync', S.ultimoRespaldo);
   actualizarEstado();
@@ -194,7 +196,7 @@ function render() {
   const v = (location.hash.slice(1) || 'inicio').split('/')[0];
   $$('.vista').forEach(s => { s.hidden = s.id !== 'v-' + v; });
   $$('nav.bottom a').forEach(a => a.classList.toggle('activo', a.dataset.v === v));
-  ({ inicio: vInicio, nuevo: vNuevo, movimientos: vMovimientos, ajustes: vAjustes }[v] || vInicio)();
+  ({ inicio: vInicio, nuevo: vNuevo, movimientos: vMovimientos, compromisos: vCompromisos, ajustes: vAjustes }[v] || vInicio)();
   $('#tituloProyecto').textContent = S.cfg.proyecto || 'Control de Obra';
   window.scrollTo(0, 0);
 }
@@ -203,8 +205,9 @@ window.addEventListener('hashchange', render);
 // ---------- Inicio (tablero) ----------
 function vInicio() {
   const rs = activos();
+  const cs = compsActivos();
   const el = $('#v-inicio');
-  if (!rs.length) {
+  if (!rs.length && !cs.length) {
     el.innerHTML = `<div class="vacio"><div style="font-size:48px">🏗️</div><p>Aún no hay pagos registrados.</p>
       <p class="mini">Toca <b>＋ Registrar</b>, o desde WhatsApp mantén presionada una factura → <b>Compartir</b> → <b>Control Obra</b>.</p>
       <a class="btn" href="#nuevo">Registrar el primer pago</a></div>`;
@@ -214,9 +217,14 @@ function vInicio() {
   const sinSop = rs.filter(r => r.soporteTipo === 'Sin soporte' && !r.archivo);
   const porC = {};
   rs.forEach(r => { const o = porC[r.concepto] || (porC[r.concepto] = { p: 0, x: 0 }); if (r.estado === 'Pagado') o.p += r.valor; else o.x += r.valor; });
+  // Saldos de compromisos (deudas/contratos) cuentan como "por pagar" en su concepto
+  let saldoComp = 0;
+  cs.forEach(c => { const s = Comp.estado(c, S.registros).saldo; if (!s) return; saldoComp += s; (porC[c.concepto] = porC[c.concepto] || { p: 0, x: 0 }).x += s; });
   const filasC = Object.entries(porC).sort((a, b) => (b[1].p + b[1].x) - (a[1].p + a[1].x));
   const maxC = Math.max(...filasC.map(([, o]) => o.p + o.x), 1);
-  const totalComp = suma(rs);
+  const totalComp = suma(rs) + saldoComp;
+  const porPagar = suma(pp) + saldoComp;
+  const venc = Comp.alertas(cs, S.registros, 30);
 
   const meses = [];
   const d = new Date(); d.setDate(1);
@@ -230,9 +238,12 @@ function vInicio() {
   el.innerHTML = `
     ${!OD.configurado() && pend && viejo ? `<div class="aviso">☁️ Tienes ${pend} cambio(s) sin respaldar en OneDrive.
       <button class="btn" id="btnRespInicio" style="width:100%;margin-top:8px">Guardar en OneDrive</button></div>` : ''}
+    ${venc.length ? `<div class="card"><h3>📅 Próximos vencimientos</h3>${venc.slice(0, 5).map(({ c, q }) => `<div class="item" data-comp="${c.id}">
+      <div><div class="t">${esc(c.nombre)}</div><small class="${q.dias <= 0 ? 'rojo-t' : ''}">${fechaCorta(q.fecha)} · ${textoVence(q)}</small></div>
+      <div class="v">${fmt(q.pendiente)}</div></div>`).join('')}</div>` : ''}
     <div class="kpis">
       <div class="kpi"><small>Total pagado</small><b>${fmt(suma(pag))}</b></div>
-      <div class="kpi ${pp.length ? 'warn' : ''}"><small>Por pagar (${pp.length})</small><b>${fmt(suma(pp))}</b></div>
+      <div class="kpi ${porPagar ? 'warn' : ''}"><small>Por pagar</small><b>${fmt(porPagar)}</b></div>
       <div class="kpi"><small>Total comprometido</small><b>${fmt(totalComp)}</b></div>
       <div class="kpi ${sinSop.length ? 'warn' : ''}"><small>Sin soporte (${sinSop.length})</small><b>${fmt(suma(sinSop))}</b></div>
     </div>
@@ -246,11 +257,14 @@ function vInicio() {
     </div>
     ${proximos.length ? `<div class="card"><h3>Pendientes por pagar</h3>${proximos.map(itemHTML).join('')}</div>` : ''}`;
   enlazarItems(el);
+  enlazarComp(el);
   const br = $('#btnRespInicio'); if (br) br.addEventListener('click', () => guardarEnOneDrive());
 }
 
 function itemHTML(r) {
   const tags = [];
+  const cm = r.compromisoId && (S.comp || []).find(c => c.id === r.compromisoId && !c.eliminado);
+  if (cm) tags.push(`<span class="tag ok">🤝 Abono: ${esc(cm.nombre)}</span>`);
   if (r.estado === 'Por pagar') tags.push('<span class="tag pp">Por pagar</span>');
   if (r.soporteTipo === 'Sin soporte' && !r.archivo) tags.push('<span class="tag ss">Sin soporte</span>');
   else if (r.archivo) tags.push(`<span class="tag">📎 ${esc(r.soporteTipo)}</span>`);
@@ -262,7 +276,7 @@ function itemHTML(r) {
   </div>`;
 }
 function enlazarItems(el) {
-  $$('.item', el).forEach(it => it.addEventListener('click', e => {
+  $$('.item[data-id]', el).forEach(it => it.addEventListener('click', e => {
     const b = e.target.closest('[data-pagar]');
     if (b) { e.stopPropagation(); marcarPagado(b.dataset.pagar); return; }
     location.hash = '#nuevo/' + it.dataset.id;
@@ -316,6 +330,8 @@ function vNuevo() {
   const id = location.hash.split('/')[1];
   const r = id ? S.registros.find(x => x.id === id) : null;
   const d = r ? { ...r } : { fecha: hoy(), estado: 'Pagado', medioPago: 'Transferencia', soporteTipo: 'Sin soporte', concepto: S.cfg.conceptos[0] };
+  if (!r && S.prefill) { Object.assign(d, S.prefill); S.prefill = null; }
+  const abiertos = (S.comp || []).filter(c => !c.eliminado && (c.id === d.compromisoId || Comp.estado(c, S.registros).saldo > 0));
   S.form = { reg: d, editId: r ? r.id : null, archivo: null, archivoCambiado: false };
   const el = $('#v-nuevo');
   el.innerHTML = `
@@ -343,6 +359,9 @@ function vNuevo() {
         <label>N° factura<input name="factura"></label>
       </div>
       <label>Concepto<select name="concepto" required>${S.cfg.conceptos.map(c => `<option>${esc(c)}</option>`).join('')}</select></label>
+      ${abiertos.length ? `<label>¿Es abono a un compromiso?<select name="compromisoId"><option value="">No, es un pago normal</option>
+        ${abiertos.map(c => `<option value="${c.id}">🤝 ${esc(c.nombre)} · saldo ${fmt(Comp.estado(c, S.registros).saldo)}</option>`).join('')}</select></label>`
+        : '<input type="hidden" name="compromisoId">'}
       <div class="seg" id="segEstado"><button type="button" data-e="Pagado">✔ Pagado</button><button type="button" data-e="Por pagar">⏳ Por pagar</button></div>
       <div class="dos">
         <label>Medio de pago<select name="medioPago">${MEDIOS.map(m => `<option>${m}</option>`).join('')}</select></label>
@@ -370,6 +389,18 @@ function vNuevo() {
   frm.elements.valor.addEventListener('input', e => { const v = num(e.target.value); e.target.value = v ? miles(v) : ''; });
   $$('#segEstado button').forEach(b => b.addEventListener('click', () => setEstado(b.dataset.e)));
   frm.elements.concepto.addEventListener('change', actualizarVisibilidad);
+  if (frm.elements.compromisoId.tagName === 'SELECT') frm.elements.compromisoId.addEventListener('change', () => {
+    const c = S.comp.find(x => x.id === frm.elements.compromisoId.value);
+    if (c) {
+      if (!frm.elements.tercero.value) frm.elements.tercero.value = c.tercero || '';
+      if (!frm.elements.docId.value) frm.elements.docId.value = c.docId || '';
+      frm.elements.concepto.value = c.concepto;
+      setEstado('Pagado');
+      const e = Comp.estado(c, S.registros);
+      if (!num(frm.elements.valor.value)) frm.elements.valor.value = miles(e.proxima ? e.proxima.pendiente : e.saldo);
+    }
+    actualizarVisibilidad();
+  });
   frm.elements.soporteTipo.addEventListener('change', actualizarVisibilidad);
   frm.elements.generarRecibo.addEventListener('change', () => {
     if (frm.elements.generarRecibo.checked) frm.elements.soporteTipo.value = 'Recibo generado';
@@ -418,7 +449,7 @@ function vNuevo() {
 
 function llenarForm(d) {
   const frm = $('#frm');
-  for (const k of ['fecha', 'tercero', 'docId', 'factura', 'concepto', 'medioPago', 'soporteTipo', 'periodo', 'observaciones', 'cufe'])
+  for (const k of ['fecha', 'tercero', 'docId', 'factura', 'concepto', 'medioPago', 'soporteTipo', 'periodo', 'observaciones', 'cufe', 'compromisoId'])
     if (d[k] != null) frm.elements[k].value = d[k];
   frm.elements.valor.value = d.valor ? miles(d.valor) : '';
   setEstado(d.estado || 'Pagado');
@@ -436,6 +467,7 @@ function actualizarVisibilidad() {
   const frm = $('#frm'); if (!frm) return;
   const tieneArch = S.form.archivo || (S.form.editId && S.registros.find(x => x.id === S.form.editId)?.archivo);
   $('#lblRecibo').hidden = !!tieneArch;
+  $('#segEstado').hidden = !!frm.elements.compromisoId.value;
   if (tieneArch) frm.elements.generarRecibo.checked = false;
   $('#lblPeriodo').hidden = !(frm.elements.concepto.value === 'Mano de obra' || frm.elements.generarRecibo.checked ||
     frm.elements.soporteTipo.value === 'Recibo generado' || frm.elements.periodo.value);
@@ -534,8 +566,8 @@ async function guardar(e) {
       ...prev, id,
       fecha: f.fecha.value || hoy(), valor,
       tercero: f.tercero.value.trim(), docId: f.docId.value.replace(/\D/g, ''), factura: f.factura.value.trim(),
-      concepto: f.concepto.value, estado: S.form.reg.estado, medioPago: f.medioPago.value, soporteTipo: f.soporteTipo.value,
-      periodo: f.periodo.value.trim(), observaciones: f.observaciones.value.trim(), cufe: f.cufe.value,
+      concepto: f.concepto.value, estado: f.compromisoId.value ? 'Pagado' : S.form.reg.estado, medioPago: f.medioPago.value, soporteTipo: f.soporteTipo.value,
+      periodo: f.periodo.value.trim(), observaciones: f.observaciones.value.trim(), cufe: f.cufe.value, compromisoId: f.compromisoId.value || '',
       creado: prev.creado || ahora, modificado: ahora, sync: false
     };
     if (!prev.id) {
@@ -564,7 +596,7 @@ async function guardar(e) {
     toast(reg.reciboNo && !prev.reciboNo ? `Pago guardado con recibo ${reg.reciboNo}` : 'Pago guardado ✔');
     sincronizar();
     if (S.cola.length) { if (location.hash === '#nuevo') render(); else location.hash = '#nuevo'; }
-    else location.hash = '#movimientos';
+    else location.hash = reg.compromisoId ? '#compromisos/' + reg.compromisoId : '#movimientos';
   } catch (err) {
     console.error(err); toast('Error al guardar: ' + err.message);
   } finally { btn.disabled = false; }
@@ -607,6 +639,13 @@ async function vAjustes() {
       El Excel se regenera en cada sincronización: haz los cambios en la app, no en el Excel.</p>
     </div>
 
+    <div class="card"><h3>🔔 Recordatorios de vencimientos</h3>
+      <p class="mini">${!('Notification' in window) ? 'Este navegador no permite notificaciones.'
+        : Notification.permission === 'granted' ? '✔ Activados. Te aviso desde 3 días antes de cada cuota de tus compromisos (y cada día si se vence). Para que lleguen aunque no abras la app, Android debe permitir que Chrome trabaje en segundo plano; si no, el aviso aparece al abrir la app.'
+        : Notification.permission === 'denied' ? '🔕 Bloqueados. Actívalos en Android: Ajustes › Apps › Control Obra › Notificaciones.'
+        : 'Desactivados.'}</p>
+      ${'Notification' in window && Notification.permission === 'default' ? '<button class="btn" data-notif>Activar recordatorios</button>' : ''}
+    </div>
     <div class="card"><h3>Exportar y copias</h3>
       <div class="fila-btns">
         <button class="btn sec" id="xExcel">⬇ Descargar Excel</button>
@@ -668,6 +707,7 @@ async function vAjustes() {
       await fusionar(j, true); toast('Copia restaurada'); render(); sincronizar();
     } catch (err) { toast('Error: ' + err.message); }
   });
+  $$('[data-notif]', el).forEach(b => b.addEventListener('click', activarAvisos));
   const rn = $('#respNuevo'); if (rn) rn.addEventListener('click', () => guardarEnOneDrive().then(() => vAjustes()));
   const rt = $('#respTodo'); if (rt) rt.addEventListener('click', () => guardarEnOneDrive(true).then(() => vAjustes()));
   const odIn = $('#odIn'); if (odIn) odIn.addEventListener('click', () => OD.login().catch(e => toast(e.message)));
@@ -719,16 +759,22 @@ const Exportar = {
     ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(filas.length, 1), c: H.length - 1 } }) };
     XLSX.utils.book_append_sheet(wb, ws, 'Movimientos');
 
-    const total = suma(rs);
-    const conceptos = [...new Set([...S.cfg.conceptos, ...rs.map(r => r.concepto)])];
-    const res = [['Concepto', 'Pagado', 'Por pagar', 'Total', '% del total', 'N° pagos', 'Sin soporte']];
+    const cs = compsActivos().map(c => ({ c, e: Comp.estado(c, S.registros) }));
+    const saldoC = {};
+    cs.forEach(({ c, e }) => { saldoC[c.concepto] = (saldoC[c.concepto] || 0) + e.saldo; });
+    const saldoTot = cs.reduce((n, x) => n + x.e.saldo, 0);
+    const total = suma(rs) + saldoTot;
+    const conceptos = [...new Set([...S.cfg.conceptos, ...rs.map(r => r.concepto), ...cs.map(x => x.c.concepto)])];
+    const res = [['Concepto', 'Pagado', 'Por pagar (incluye saldos de compromisos)', 'Total', '% del total', 'N° pagos', 'Sin soporte']];
     conceptos.forEach(c => {
-      const g = rs.filter(r => r.concepto === c); if (!g.length) return;
-      const t = suma(g);
-      res.push([c, suma(g.filter(r => r.estado === 'Pagado')), suma(g.filter(r => r.estado === 'Por pagar')), t, total ? t / total : 0, g.length,
+      const g = rs.filter(r => r.concepto === c); const sc = saldoC[c] || 0;
+      if (!g.length && !sc) return;
+      const pp = suma(g.filter(r => r.estado === 'Por pagar')) + sc;
+      const t = suma(g.filter(r => r.estado === 'Pagado')) + pp;
+      res.push([c, suma(g.filter(r => r.estado === 'Pagado')), pp, t, total ? t / total : 0, g.length,
         suma(g.filter(r => r.soporteTipo === 'Sin soporte' && !r.archivo))]);
     });
-    res.push(['TOTAL', suma(rs.filter(r => r.estado === 'Pagado')), suma(rs.filter(r => r.estado === 'Por pagar')), total, total ? 1 : 0, rs.length,
+    res.push(['TOTAL', suma(rs.filter(r => r.estado === 'Pagado')), suma(rs.filter(r => r.estado === 'Por pagar')) + saldoTot, total, total ? 1 : 0, rs.length,
       suma(rs.filter(r => r.soporteTipo === 'Sin soporte' && !r.archivo))]);
     const ws2 = XLSX.utils.aoa_to_sheet(res);
     for (let i = 1; i < res.length; i++) {
@@ -750,13 +796,37 @@ const Exportar = {
     ws3['!cols'] = [10, 15, 15, 15, 16].map(w => ({ wch: w }));
     XLSX.utils.book_append_sheet(wb, ws3, 'Por mes');
 
+    if (cs.length) {
+      const aF = f => { const [y, m, d] = f.split('-').map(Number); return new Date(y, m - 1, d, 12); };
+      const hc = [['Compromiso', 'Proveedor / persona', 'NIT / CC', 'Concepto', 'Total pactado', 'Pagado', 'Saldo', '% pagado', 'Próximo vencimiento', 'Valor próxima cuota', 'Estado']];
+      cs.forEach(({ c, e }) => hc.push([c.nombre, c.tercero, c.docId, c.concepto, c.total, e.pagado, e.saldo, e.pct / 100,
+        e.proxima ? aF(e.proxima.fecha) : '', e.proxima ? e.proxima.pendiente : '', e.cerrado ? 'Pagado' : e.proxima && e.proxima.dias < 0 ? 'Vencido' : 'Al día']));
+      const w4 = XLSX.utils.aoa_to_sheet(hc, { cellDates: true });
+      for (let i = 1; i < hc.length; i++) {
+        [4, 5, 6, 9].forEach(c => { const x = w4[XLSX.utils.encode_cell({ r: i, c })]; if (x) x.z = '#,##0'; });
+        const p = w4[XLSX.utils.encode_cell({ r: i, c: 7 })]; if (p) p.z = '0%';
+        const f = w4[XLSX.utils.encode_cell({ r: i, c: 8 })]; if (f && f.t === 'd') f.z = 'dd/mm/yyyy';
+      }
+      w4['!cols'] = [28, 26, 13, 30, 15, 15, 15, 9, 13, 15, 10].map(w => ({ wch: w }));
+      XLSX.utils.book_append_sheet(wb, w4, 'Compromisos');
+
+      const hq = [['Compromiso', 'Fecha', 'Valor cuota', 'Cubierto', 'Pendiente', 'Estado']];
+      cs.forEach(({ c, e }) => e.cuotas.forEach(q => hq.push([c.nombre, aF(q.fecha), q.valor, q.cubierto, q.pendiente, q.estado])));
+      const w5 = XLSX.utils.aoa_to_sheet(hq, { cellDates: true });
+      for (let i = 1; i < hq.length; i++) {
+        const f = w5[XLSX.utils.encode_cell({ r: i, c: 1 })]; if (f) f.z = 'dd/mm/yyyy';
+        [2, 3, 4].forEach(c => { const x = w5[XLSX.utils.encode_cell({ r: i, c })]; if (x) x.z = '#,##0'; });
+      }
+      w5['!cols'] = [28, 12, 15, 15, 15, 11].map(w => ({ wch: w }));
+      XLSX.utils.book_append_sheet(wb, w5, 'Cuotas');
+    }
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   }
 };
 
 // ---------- Sincronización con OneDrive ----------
-const paquete = () => ({ app: 'ControlObra', version: 1, exportado: new Date().toISOString(), cfg: S.cfg, registros: S.registros });
+const paquete = () => ({ app: 'ControlObra', version: 2, exportado: new Date().toISOString(), cfg: S.cfg, registros: S.registros, compromisos: S.comp });
 
 async function fusionar(rem, desdeCopia = false) {
   if (!rem || !Array.isArray(rem.registros)) return;
@@ -771,6 +841,12 @@ async function fusionar(rem, desdeCopia = false) {
     }
   }
   S.registros = [...mapa.values()];
+  if (Array.isArray(rem.compromisos)) {
+    const mc = new Map(S.comp.map(c => [c.id, c]));
+    rem.compromisos.forEach(c => { const l = mc.get(c.id); if (!l || (c.modificado || 0) > (l.modificado || 0)) mc.set(c.id, { ...c, sync: !desdeCopia }); });
+    S.comp = [...mc.values()];
+    await guardarComps();
+  }
   if (rem.cfg) {
     const ter = { ...(rem.cfg.terceros || {}), ...S.cfg.terceros };
     const consec = Math.max(rem.cfg.consecRecibo || 0, S.cfg.consecRecibo || 0);
@@ -862,6 +938,7 @@ async function cargarCompartidos() {
   $('#btnSync').addEventListener('click', () => OD.configurado() ? sincronizar(true) : guardarEnOneDrive());
   if (!OD.configurado()) { $('#btnSync').textContent = '☁️'; $('#btnSync').title = 'Guardar en OneDrive'; }
   setTimeout(() => cargarLib('xlsx').catch(() => {}), 2000); // precarga para que el respaldo sea inmediato
+  programarAvisos().catch(e => console.warn('avisos', e));
   window.addEventListener('online', () => sincronizar());
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible') return;

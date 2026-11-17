@@ -1,9 +1,22 @@
 // Service worker: funcionamiento sin conexión + recibir archivos desde "Compartir" (WhatsApp).
-importScripts('./db.js');
+importScripts('./db.js', './compromisos.js');
 
-const VERSION = 'co-v3';
-const SHELL = ['./', './index.html', './styles.css', './app.js', './db.js', './extract.js',
+const VERSION = 'co-v4';
+const SHELL = ['./', './index.html', './styles.css', './app.js', './db.js', './extract.js', './compromisos.js',
   './onedrive.js', './recibo.js', './config.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+
+// Recordatorios de vencimientos en segundo plano (cuando Android/Chrome lo permite)
+self.addEventListener('periodicsync', e => {
+  if (e.tag === 'vencimientos') e.waitUntil(revisarVencimientos(self.registration));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || './', self.registration.scope).href;
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
+    for (const c of cs) if ('focus' in c) { c.navigate(url).catch(() => {}); return c.focus(); }
+    return clients.openWindow(url);
+  }));
+});
 const CDN = ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com'];
 
 self.addEventListener('install', e => {

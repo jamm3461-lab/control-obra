@@ -15,6 +15,8 @@ Funciona sin mensualidades. Los datos se guardan en el celular y se respaldan en
   - Fotos y capturas: lectura de texto (OCR) en el propio celular.
   - Opcional: con "📋 Pegar de Claude", usando tu suscripción de Claude.
 - **Pagos sin soporte** (maestros, ayudantes): se marcan como "Sin soporte", o la app genera un **recibo de pago en PDF** numerado (RC-0001, RC-0002…).
+- **Compromisos (pestaña 🤝 Deudas):** deudas y contratos que se pagan por partes (compra del lote, contrato del maestro). Total pactado, cuotas con fecha, abonos ligados, saldo y alertas de vencimiento con notificaciones en el celular.
+- **Corregir errores:** toca cualquier pago en la pestaña Pagos para editarlo o eliminarlo; los compromisos tienen botón Editar y Eliminar.
 - **Estados de pago:** Pagado o Por pagar, con un botón para "Marcar pagado".
 - **Alerta de duplicados:** avisa si registras dos veces la misma factura (por CUFE, o por número de factura y NIT).
 - **Tablero:** total pagado, total por pagar, gasto por concepto, gasto por mes y pagos sin soporte.
