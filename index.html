@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Control de Obra</title>
+  <meta name="theme-color" content="#1f3a5f">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1 id="tituloProyecto">Control de Obra</h1>
+      <small id="estadoSync">Cargando…</small>
+    </div>
+    <button id="btnSync" class="icon-btn" title="Sincronizar con OneDrive" aria-label="Sincronizar">⟳</button>
+  </header>
+
+  <main>
+    <section id="v-inicio" class="vista"></section>
+    <section id="v-movimientos" class="vista" hidden></section>
+    <section id="v-nuevo" class="vista" hidden></section>
+    <section id="v-ajustes" class="vista" hidden></section>
+  </main>
+
+  <nav class="bottom">
+    <a href="#inicio" data-v="inicio"><span>📊</span>Inicio</a>
+    <a href="#movimientos" data-v="movimientos"><span>📋</span>Pagos</a>
+    <a href="#nuevo" data-v="nuevo" class="fab"><span>＋</span>Registrar</a>
+    <a href="#ajustes" data-v="ajustes"><span>⚙️</span>Ajustes</a>
+  </nav>
+
+  <div id="toast" aria-live="polite"></div>
+
+  <script src="config.js"></script>
+  <script src="db.js"></script>
+  <script src="extract.js"></script>
+  <script src="onedrive.js"></script>
+  <script src="recibo.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
