@@ -111,3 +111,4 @@ details summary { cursor: pointer; color: var(--pri2); font-size: 14px; padding:
 pre.prompt { white-space: pre-wrap; font-size: 12px; background: var(--bg); padding: 10px; border-radius: 10px; max-height: 220px; overflow: auto; }
 .cufe { font-size: 11px; color: var(--sub); word-break: break-all; margin-bottom: 10px; }
 [hidden] { display: none !important; }
+.btn.instalar { width: 100%; margin-bottom: 12px; background: var(--acc); }

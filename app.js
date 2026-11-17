@@ -779,5 +779,15 @@ async function cargarCompartidos() {
     if (S.cola.length > antes && !location.hash.startsWith('#nuevo/')) { if (location.hash === '#nuevo') render(); else location.hash = '#nuevo'; }
   });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW', e));
+  // Botón propio de instalación (cuando Chrome lo permite)
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    const b = document.createElement('button');
+    b.className = 'btn instalar';
+    b.textContent = '📲 Instalar app en este celular';
+    b.addEventListener('click', async () => { e.prompt(); await e.userChoice; b.remove(); });
+    document.querySelector('main').prepend(b);
+  });
+  window.addEventListener('appinstalled', () => { document.querySelector('.instalar')?.remove(); toast('App instalada ✔'); });
   sincronizar();
 })();
